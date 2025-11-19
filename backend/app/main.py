@@ -96,6 +96,18 @@ class VoiceCommandRequest(BaseModel):
     transcript: str
 
 
+# Helper functions
+def get_time_of_day() -> str:
+    """Get current time of day (morning, afternoon, evening)."""
+    hour = datetime.now().hour
+    if 5 <= hour < 12:
+        return "morning"
+    elif 12 <= hour < 18:
+        return "afternoon"
+    else:
+        return "evening"
+
+
 # Background task for clock updates
 async def broadcast_clock_updates():
     """Broadcast time updates every second."""
@@ -155,10 +167,133 @@ async def websocket_endpoint(websocket: WebSocket):
                     "data": message.get("data")
                 })
 
-            elif message.get("type") == "voice_audio":
-                # Forward audio to AI server for processing
-                # TODO: Implement voice processing
-                pass
+            elif message.get("type") == "motion_detected":
+                # Motion detected by frontend camera
+                logger.info(f"Motion detected: {message.get('data')}")
+
+                # Request high-res frame for face recognition
+                await websocket.send_json({
+                    "type": "command",
+                    "command": "capture_frame",
+                    "data": {
+                        "resolution": "high",
+                        "reason": "face_recognition"
+                    }
+                })
+
+                # Start listening for wake word
+                await websocket.send_json({
+                    "type": "command",
+                    "command": "start_listening",
+                    "data": {
+                        "mode": "wake_word"
+                    }
+                })
+
+            elif message.get("type") == "camera_frame":
+                # High-res frame received from frontend
+                logger.info("Camera frame received, processing for face recognition...")
+
+                try:
+                    # Forward to AI server for face recognition
+                    import httpx
+                    from app.config import settings
+
+                    async with httpx.AsyncClient(timeout=10.0) as client:
+                        response = await client.post(
+                            f"{settings.ai_server_url}/faces/recognize",
+                            json={"image": message.get("data", {}).get("image")}
+                        )
+
+                        if response.status_code == 200:
+                            result = response.json()
+                            logger.info(f"Face recognition result: {result}")
+
+                            # Store detection in database
+                            # TODO: Save to database
+
+                            # If person recognized, trigger greeting
+                            if result.get("person") not in ["unknown", "none", "error"]:
+                                await websocket.send_json({
+                                    "type": "command",
+                                    "command": "show_greeting",
+                                    "data": {
+                                        "person": result.get("person"),
+                                        "confidence": result.get("confidence"),
+                                        "time_of_day": get_time_of_day()
+                                    }
+                                })
+                        else:
+                            logger.error(f"AI server error: {response.status_code}")
+
+                except Exception as e:
+                    logger.error(f"Error processing camera frame: {e}")
+
+            elif message.get("type") == "audio_chunk":
+                # Audio chunk received for wake word detection
+                # Forward to AI server
+                try:
+                    import httpx
+                    from app.config import settings
+
+                    # TODO: Buffer chunks and send to AI server for wake word detection
+                    # For now, just log
+                    logger.debug("Audio chunk received (wake word detection)")
+
+                except Exception as e:
+                    logger.error(f"Error processing audio chunk: {e}")
+
+            elif message.get("type") == "voice_query":
+                # Full voice query received
+                logger.info("Voice query received, processing with STT...")
+
+                try:
+                    import httpx
+                    from app.config import settings
+
+                    # Forward to AI server for STT
+                    async with httpx.AsyncClient(timeout=30.0) as client:
+                        response = await client.post(
+                            f"{settings.ai_server_url}/voice/transcribe",
+                            json={
+                                "audio": message.get("data", {}).get("audio"),
+                                "language": "en"
+                            }
+                        )
+
+                        if response.status_code == 200:
+                            result = response.json()
+                            transcript = result.get("transcript", "")
+                            logger.info(f"Transcript: {transcript}")
+
+                            # Process intent
+                            # TODO: Implement intent processing
+
+                            # Generate response
+                            # TODO: Generate proper response
+                            response_text = f"I heard: {transcript}"
+
+                            # Send TTS back to frontend
+                            tts_response = await client.post(
+                                f"{settings.ai_server_url}/voice/tts",
+                                json={"text": response_text}
+                            )
+
+                            if tts_response.status_code == 200:
+                                tts_data = tts_response.json()
+                                await websocket.send_json({
+                                    "type": "command",
+                                    "command": "speak",
+                                    "data": {
+                                        "audio": tts_data.get("audio"),
+                                        "text": response_text
+                                    }
+                                })
+                        else:
+                            logger.error(f"STT error: {response.status_code}")
+
+                except Exception as e:
+                    logger.error(f"Error processing voice query: {e}")
 
     except WebSocketDisconnect:
         manager.disconnect(websocket)

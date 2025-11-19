@@ -8,6 +8,8 @@ import React, { useEffect, useState } from 'react';
 import styled from 'styled-components';
 import { Clock } from './components/Clock';
 import { Weather } from './components/Weather';
+import { CameraCapture } from './components/CameraCapture';
+import { AudioCapture } from './components/AudioCapture';
 import { wsService } from './services/websocket';
 import { Settings } from './types';
 
@@ -156,9 +158,20 @@ function App() {
         units={settings.weather_location?.units as 'metric' | 'imperial'}
       />
 
-      {/* Additional components will be added here:
-          - CameraCapture (hidden, handles PS Eye)
-          - AudioCapture (hidden, handles microphone)
+      {/* Hardware I/O Components (Hidden - handle camera & mic) */}
+      <CameraCapture
+        enabled={process.env.REACT_APP_ENABLE_CAMERA !== 'false'}
+        motionSensitivity={settings.voice?.sensitivity ? settings.voice.sensitivity * 100 : 50}
+        motionFps={1}
+      />
+
+      <AudioCapture
+        enabled={process.env.REACT_APP_ENABLE_VOICE !== 'false'}
+        bufferDuration={3}
+        chunkSize={100}
+      />
+
+      {/* Future components:
           - PersonGreeting (overlay when person detected)
           - MediaPlayer (fullscreen when playing)
           - APIWidgets (custom data displays)
