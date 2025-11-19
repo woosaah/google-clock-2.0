@@ -10,6 +10,7 @@ import { Clock } from './components/Clock';
 import { Weather } from './components/Weather';
 import { CameraCapture } from './components/CameraCapture';
 import { AudioCapture } from './components/AudioCapture';
+import { PersonGreeting } from './components/PersonGreeting';
 import { wsService } from './services/websocket';
 import { Settings } from './types';
 
@@ -48,6 +49,13 @@ function App() {
   const [connected, setConnected] = useState(false);
   const [settings, setSettings] = useState<Settings>({});
   const [brightness, setBrightness] = useState(100);
+  const [greetingData, setGreetingData] = useState<{
+    show: boolean;
+    person: string;
+    confidence?: number;
+    timeOfDay: 'morning' | 'afternoon' | 'evening';
+    customInfo?: string;
+  } | null>(null);
 
   useEffect(() => {
     // Connect to backend WebSocket
@@ -109,7 +117,14 @@ function App() {
         break;
 
       case 'show_greeting':
-        // PersonGreeting component will handle this
+        // Show personalized greeting
+        setGreetingData({
+          show: true,
+          person: command.data?.person || 'Guest',
+          confidence: command.data?.confidence,
+          timeOfDay: command.data?.time_of_day || 'morning',
+          customInfo: command.data?.custom_info,
+        });
         break;
 
       case 'update_widgets':
@@ -171,8 +186,20 @@ function App() {
         chunkSize={100}
       />
 
+      {/* PersonGreeting Overlay */}
+      {greetingData && (
+        <PersonGreeting
+          show={greetingData.show}
+          person={greetingData.person}
+          confidence={greetingData.confidence}
+          timeOfDay={greetingData.timeOfDay}
+          customInfo={greetingData.customInfo}
+          onDismiss={() => setGreetingData(null)}
+          autoDismissDelay={5000}
+        />
+      )}
+
       {/* Future components:
-          - PersonGreeting (overlay when person detected)
           - MediaPlayer (fullscreen when playing)
           - APIWidgets (custom data displays)
       */}

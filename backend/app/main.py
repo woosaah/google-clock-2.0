@@ -128,6 +128,15 @@ async def broadcast_clock_updates():
 async def startup_event():
     """Run startup tasks."""
     logger.info("Starting Google Clock 2.0 Backend...")
+
+    # Initialize weather service
+    from app.services.weather_service import init_weather_service
+    init_weather_service(settings.openweather_api_key)
+
+    # Initialize COLEHUB connection
+    from app.services.colehub_service import init_colehub_connection
+    init_colehub_connection()
+
     # Start background clock updates
     asyncio.create_task(broadcast_clock_updates())
 
@@ -210,19 +219,53 @@ async def websocket_endpoint(websocket: WebSocket):
                             logger.info(f"Face recognition result: {result}")
 
                             # Store detection in database
-                            # TODO: Save to database
+                            from app.database import Detection, Person
+                            db = SessionLocal()
+                            try:
+                                person_name = result.get("person")
 
-                            # If person recognized, trigger greeting
-                            if result.get("person") not in ["unknown", "none", "error"]:
-                                await websocket.send_json({
-                                    "type": "command",
-                                    "command": "show_greeting",
-                                    "data": {
-                                        "person": result.get("person"),
-                                        "confidence": result.get("confidence"),
-                                        "time_of_day": get_time_of_day()
-                                    }
-                                })
+                                # Only save if a person was recognized
+                                if person_name and person_name not in ["unknown", "none", "error"]:
+                                    # Get or create person
+                                    person = db.query(Person).filter(Person.name == person_name).first()
+
+                                    # Check if this is first detection of the day
+                                    today = datetime.now().date()
+                                    first_today = db.query(Detection).filter(
+                                        Detection.person_id == (person.id if person else None),
+                                        Detection.detected_at >= today
+                                    ).first() is None if person else True
+
+                                    # Create detection record
+                                    detection = Detection(
+                                        person_id=person.id if person else None,
+                                        confidence=result.get("confidence", 0.0),
+                                        first_of_day=first_today,
+                                        greeted=True  # Will be set to True after showing greeting
+                                    )
+                                    db.add(detection)
+                                    db.commit()
+                                    logger.info(f"Detection saved: {person_name} (first of day: {first_today})")
+
+                                    # Trigger greeting only if first detection of the day
+                                    if first_today:
+                                        await websocket.send_json({
+                                            "type": "command",
+                                            "command": "show_greeting",
+                                            "data": {
+                                                "person": person_name,
+                                                "confidence": result.get("confidence"),
+                                                "time_of_day": get_time_of_day()
+                                            }
+                                        })
+                                    else:
+                                        logger.info(f"{person_name} already greeted today, skipping greeting")
+
+                            except Exception as e:
+                                logger.error(f"Error saving detection: {e}")
+                                db.rollback()
+                            finally:
+                                db.close()
                         else:
                             logger.error(f"AI server error: {response.status_code}")
 
@@ -268,10 +311,31 @@ async def websocket_endpoint(websocket: WebSocket):
 
                             # Process intent
                             # TODO: Implement intent processing
+                            intent = "unknown"
 
                             # Generate response
-                            # TODO: Generate proper response
+                            # TODO: Generate proper response with NLP
                             response_text = f"I heard: {transcript}"
+
+                            # Save voice command to database
+                            from app.database import VoiceCommand
+                            db = SessionLocal()
+                            try:
+                                voice_cmd = VoiceCommand(
+                                    transcript=transcript,
+                                    intent=intent,
+                                    response=response_text,
+                                    confidence=100,  # Whisper doesn't provide confidence
+                                    duration_ms=message.get("data", {}).get("duration", 0) * 1000
+                                )
+                                db.add(voice_cmd)
+                                db.commit()
+                                logger.info(f"Voice command saved: {transcript}")
+                            except Exception as e:
+                                logger.error(f"Error saving voice command: {e}")
+                                db.rollback()
+                            finally:
+                                db.close()
 
                             # Send TTS back to frontend
                             tts_response = await client.post(
@@ -524,16 +588,34 @@ async def update_setting(update: SettingUpdate, db: Session = Depends(get_db)):
 # Weather API
 
 @app.get("/api/weather")
-async def get_weather():
+async def get_weather(
+    city: str = "San Francisco",
+    country: str = "US",
+    units: str = "metric"
+):
     """Get current weather."""
-    # TODO: Implement OpenWeatherMap API integration
-    return {
-        "temperature": 72,
-        "condition": "Sunny",
-        "humidity": 45,
-        "wind_speed": 10,
-        "icon": "01d"
-    }
+    from app.services.weather_service import get_weather_service
+
+    try:
+        weather_svc = get_weather_service()
+        weather_data = await weather_svc.get_current_weather(city, country, units)
+
+        if weather_data:
+            return weather_data
+        else:
+            raise HTTPException(status_code=500, detail="Failed to fetch weather")
+
+    except Exception as e:
+        logger.error(f"Error getting weather: {e}")
+        # Return mock data as fallback
+        return {
+            "temperature": 72,
+            "condition": "Sunny",
+            "humidity": 45,
+            "wind_speed": 10,
+            "icon": "01d",
+            "mock": True
+        }
 
 
 # Calendar API
@@ -579,6 +661,50 @@ async def process_voice_command(command: VoiceCommandRequest, db: Session = Depe
         "transcript": command.transcript,
         "response": "Voice processing coming soon!"
     }
+
+
+# COLEHUB Integration API
+
+@app.get("/api/colehub/points")
+async def get_cole_points():
+    """Get Cole's current points and statistics."""
+    from app.services.colehub_service import get_colehub_service
+
+    try:
+        colehub_svc = get_colehub_service()
+        points_data = await colehub_svc.get_cole_points()
+        return points_data
+    except Exception as e:
+        logger.error(f"Error fetching Cole's points: {e}")
+        raise HTTPException(status_code=500, detail="Failed to fetch points data")
+
+
+@app.get("/api/colehub/tasks")
+async def get_cole_tasks(limit: int = 10):
+    """Get Cole's pending tasks."""
+    from app.services.colehub_service import get_colehub_service
+
+    try:
+        colehub_svc = get_colehub_service()
+        tasks = await colehub_svc.get_cole_tasks(limit=limit)
+        return {"tasks": tasks, "count": len(tasks)}
+    except Exception as e:
+        logger.error(f"Error fetching Cole's tasks: {e}")
+        raise HTTPException(status_code=500, detail="Failed to fetch tasks")
+
+
+@app.get("/api/colehub/achievements")
+async def get_cole_achievements(days: int = 7):
+    """Get Cole's recent achievements."""
+    from app.services.colehub_service import get_colehub_service
+
+    try:
+        colehub_svc = get_colehub_service()
+        achievements = await colehub_svc.get_recent_achievements(days=days)
+        return {"achievements": achievements, "count": len(achievements)}
+    except Exception as e:
+        logger.error(f"Error fetching achievements: {e}")
+        raise HTTPException(status_code=500, detail="Failed to fetch achievements")
 
 
 # Run the application
