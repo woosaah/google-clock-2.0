@@ -1,0 +1,28 @@
+[Unit]
+Description=Google Clock 2.0 Backend Server
+After=network.target postgresql.service
+Requires=postgresql.service
+
+[Service]
+Type=simple
+User=your-username
+Group=your-username
+WorkingDirectory=/path/to/google-clock-2.0/backend
+Environment="PATH=/path/to/google-clock-2.0/backend/venv/bin"
+Environment="PYTHONUNBUFFERED=1"
+EnvironmentFile=/path/to/google-clock-2.0/backend/.env
+ExecStart=/path/to/google-clock-2.0/backend/venv/bin/python app/main.py
+Restart=always
+RestartSec=10
+
+# Logging
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=googleclock-backend
+
+# Security
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

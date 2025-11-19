@@ -1,0 +1,32 @@
+[Unit]
+Description=Google Clock 2.0 AI Server (Face Recognition, Voice Processing)
+After=network.target
+
+[Service]
+Type=simple
+User=your-username
+Group=your-username
+WorkingDirectory=/path/to/google-clock-2.0/ai-server
+Environment="PATH=/path/to/google-clock-2.0/ai-server/venv/bin"
+Environment="PYTHONUNBUFFERED=1"
+EnvironmentFile=/path/to/google-clock-2.0/ai-server/.env
+ExecStart=/path/to/google-clock-2.0/ai-server/venv/bin/python main.py
+Restart=always
+RestartSec=10
+
+# Logging
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=googleclock-ai-server
+
+# Security
+NoNewPrivileges=true
+PrivateTmp=true
+
+# Allow GPU access (for CUDA)
+DeviceAllow=/dev/nvidia0 rw
+DeviceAllow=/dev/nvidiactl rw
+DeviceAllow=/dev/nvidia-uvm rw
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,27 @@
+fastapi==0.104.1
+uvicorn[standard]==0.24.0
+websockets==12.0
+python-dotenv==1.0.0
+psycopg2-binary==2.9.9
+sqlalchemy==2.0.23
+asyncpg==0.29.0
+httpx==0.25.2
+python-multipart==0.0.6
+pydantic==2.5.2
+pydantic-settings==2.1.0
+
+# API integrations
+requests==2.31.0
+google-auth==2.25.2
+google-auth-oauthlib==1.2.0
+google-api-python-client==2.110.0
+
+# Media processing
+yt-dlp==2023.11.16
+Pillow==10.1.0
+ffmpeg-python==0.2.0
+
+# Utilities
+python-dateutil==2.8.2
+pytz==2023.3
+aiofiles==23.2.1
